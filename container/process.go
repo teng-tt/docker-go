@@ -9,9 +9,7 @@ package container
 
 import (
 	"docker-go/common"
-	"fmt"
 	"github.com/sirupsen/logrus"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
@@ -19,7 +17,7 @@ import (
 )
 
 // NewParentProcess 创建一个会隔离namespace进程的Comand
-func NewParentProcess(tty bool, volume string) (*exec.Cmd, *os.File) {
+func NewParentProcess(tty bool, volume string, containerName, imageName string, envs []string) (*exec.Cmd, *os.File) {
 	readPipe, writePipe, _ := os.Pipe()
 	// 调用自身，传入 init 参数， 也就是执行initComand
 	cmd := exec.Command("/proc/self/exe", "init")
@@ -34,7 +32,7 @@ func NewParentProcess(tty bool, volume string) (*exec.Cmd, *os.File) {
 		cmd.Stderr = os.Stderr
 	} else {
 		// 创建日志存放目录
-		logDir := path.Join(common.DefaultContainerInfoPath, "container")
+		logDir := path.Join(common.DefaultContainerInfoPath, containerName)
 		if _, err := os.Stat(logDir); err != nil && os.IsNotExist(err) {
 			err = os.MkdirAll(logDir, os.ModePerm)
 			if err != nil {
@@ -50,11 +48,13 @@ func NewParentProcess(tty bool, volume string) (*exec.Cmd, *os.File) {
 		// 将cmd的输出流改到日志文件中
 		cmd.Stdout = file
 	}
+	// 设置额外文件句柄
 	cmd.ExtraFiles = []*os.File{
 		readPipe,
 	}
-
-	err := NewWorkSpace(common.RootPath, common.MntPath, volume)
+	// 设置环境变量
+	cmd.Env = append(os.Environ(), envs...)
+	err := NewWorkSpace(volume, containerName, imageName)
 	if err != nil {
 		logrus.Errorf("new work space, err: %v", err)
 	}
@@ -62,20 +62,4 @@ func NewParentProcess(tty bool, volume string) (*exec.Cmd, *os.File) {
 	// 指定容器初始化后的工作目录
 	cmd.Dir = common.MntPath
 	return cmd, writePipe
-}
-
-// LookContainerLog 用于查看容器内日志信息
-func LookContainerLog(containerName string) {
-	// 打开文件
-	logFileName := path.Join(common.DefaultContainerInfoPath, containerName, common.ContainerLogFileName)
-	file, err := os.Open(logFileName)
-	if err != nil {
-		logrus.Errorf("open log file, path: %s, err: %v", logFileName, err)
-	}
-	// 读文件
-	bs, err := ioutil.ReadAll(file)
-	if err != nil {
-		logrus.Errorf("read log file, err: %v", err)
-	}
-	_, _ = fmt.Fprint(os.Stdout, string(bs))
 }

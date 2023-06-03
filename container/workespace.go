@@ -17,49 +17,49 @@ import (
 )
 
 // NewWorkSpace 创建容器运行时目录
-func NewWorkSpace(rootPath, mntPath, volume string) error {
+func NewWorkSpace(volume, containerName, imageNmae string) error {
 	// 1.创建只读层
-	err := createReadOnlyLayer(rootPath)
+	err := createReadOnlyLayer(imageNmae)
 	if err != nil {
 		logrus.Errorf("create read only layer, err: %v", err)
 		return err
 	}
 	// 2. 创建读写层
-	err = createWriteLayer(rootPath)
+	err = createWriteLayer(containerName)
 	if err != nil {
 		logrus.Errorf("create write layer, err: %v", err)
 		return err
 	}
 	// 3. 创建挂载点，将只读层和读写层挂载到指定的位置
-	err = CreateMountPoint(rootPath, mntPath)
+	err = CreateMountPoint(containerName, imageNmae)
 	if err != nil {
 		logrus.Errorf("create mount point, err: %v", err)
 		return err
 	}
 
 	// 4. 设置宿主机与容器文件映射
-	mountVolume(rootPath, mntPath, volume)
+	mountVolume(containerName, imageNmae, volume)
 
 	return nil
 }
 
-// 创建只读层
-func createReadOnlyLayer(rootPath string) error {
+// 根据镜像创建只读层
+func createReadOnlyLayer(imageName string) error {
 	// 创建只读层目录
-	busyBoxPath := path.Join(rootPath, common.BusyBox)
-	_, err := os.Stat(busyBoxPath)
+	imagePath := path.Join(common.RootPath, imageName)
+	_, err := os.Stat(imagePath)
 	if err != nil && os.IsNotExist(err) {
-		err := os.MkdirAll(busyBoxPath, os.ModePerm)
+		err := os.MkdirAll(imagePath, os.ModePerm)
 		if err != nil {
-			logrus.Errorf("mkdir busybox, err: %v", err)
+			logrus.Errorf("mkdir image path, err: %v", err)
 			return err
 		}
 	}
 
-	// 解压 busybox.tar
-	busyBoxTarPath := path.Join(rootPath, common.BusyBoxTar)
-	if _, err = exec.Command("tar", "-xvf", busyBoxTarPath, "-C", busyBoxPath).CombinedOutput(); err != nil {
-		logrus.Errorf("tar busybox.tar, err: %v", err)
+	// 解压 /root/imageName.tar
+	imageTarPath := path.Join(common.RootPath, fmt.Sprintf("%s.tar", imageName))
+	if _, err = exec.Command("tar", "-xvf", imageTarPath, "-C", imagePath).CombinedOutput(); err != nil {
+		logrus.Errorf("tar image tar, path: %s, err: %v", imageTarPath, err)
 		return err
 	}
 
@@ -67,8 +67,8 @@ func createReadOnlyLayer(rootPath string) error {
 }
 
 // 创建读写层
-func createWriteLayer(rootPath string) error {
-	writeLayerPath := path.Join(rootPath, common.WriteLayer)
+func createWriteLayer(containerName string) error {
+	writeLayerPath := path.Join(common.RootPath, common.WriteLayer, containerName)
 	_, err := os.Stat(writeLayerPath)
 	if err != nil && os.IsNotExist(err) {
 		err = os.MkdirAll(writeLayerPath, os.ModePerm)
@@ -82,19 +82,22 @@ func createWriteLayer(rootPath string) error {
 }
 
 // CreateMountPoint 创建挂载点
-func CreateMountPoint(rootPath, mntPath string) error {
+func CreateMountPoint(containerName, imageName string) error {
+	mntPath := path.Join(common.MntPath, containerName)
 	_, err := os.Stat(mntPath)
 	if err != nil && os.IsNotExist(err) {
-		err := os.MkdirAll(mntPath, os.ModePerm)
+		err = os.MkdirAll(mntPath, os.ModePerm)
 		if err != nil {
 			logrus.Errorf("mkdir mnt path, err: %v", err)
 			return err
 		}
 	}
-
-	dirs := fmt.Sprintf("dir=%s%s:%s%s", rootPath, common.WriteLayer, rootPath, common.BusyBox)
+	// 将宿主机上关于容器的读写层和只读层挂载到 /root/mnt/容器名 里
+	writeLayPath := path.Join(common.RootPath, common.WriteLayer, containerName)
+	imagePath := path.Join(common.RootPath, imageName)
+	dirs := fmt.Sprintf("dirs=%s:%s", writeLayPath, imagePath)
 	cmd := exec.Command("mount", "-t", "aufs", "-o", dirs, "none", mntPath)
-	if err := cmd.Run(); err != nil {
+	if err = cmd.Run(); err != nil {
 		logrus.Errorf("mnt cmd run, err: %v", err)
 		return err
 	}
@@ -103,7 +106,7 @@ func CreateMountPoint(rootPath, mntPath string) error {
 }
 
 // 创建挂载卷
-func mountVolume(rootPath, mntPath, volume string) {
+func mountVolume(containerName, imageName, volume string) {
 	if volume != "" {
 		volumes := strings.Split(volume, ":")
 		if len(volumes) > 1 {
@@ -117,7 +120,7 @@ func mountVolume(rootPath, mntPath, volume string) {
 
 			// 创建容器内挂载点
 			containerPath := volumes[1]
-			containerVolumePath := path.Join(mntPath, containerPath)
+			containerVolumePath := path.Join(common.MntPath, containerName, containerPath)
 			if _, err := os.Stat(containerVolumePath); err != nil && os.IsNotExist(err) {
 				if err = os.MkdirAll(containerVolumePath, os.ModePerm); err != nil {
 					logrus.Errorf("mkdir volume path path: %s, err: %v", containerVolumePath, err)
@@ -137,26 +140,27 @@ func mountVolume(rootPath, mntPath, volume string) {
 }
 
 // DeleteWorkSpace 删除容器工作空间
-func DeleteWorkSpace(rootPath, mntPath, volume string) error {
+func DeleteWorkSpace(containerName, volume string) error {
 	// 1. 卸载挂载点
-	err := unMountPoint(mntPath)
+	err := unMountPoint(containerName)
 	if err != nil {
 		return err
 	}
 
 	// 2. 删除读写层
-	err = deleteWriteLayer(rootPath)
+	err = deleteWriteLayer(containerName)
 	if err != nil {
 		return err
 	}
 
 	// 3. 删除宿主机与文件系统映射
-	deleteVolume(mntPath, volume)
+	deleteVolume(containerName, volume)
 	return nil
 }
 
 // 卸载挂载点
-func unMountPoint(mntPath string) error {
+func unMountPoint(containerName string) error {
+	mntPath := path.Join(common.MntPath, containerName)
 	if _, err := exec.Command("umount", mntPath).CombinedOutput(); err != nil {
 		logrus.Errorf("unmount mnt, err: %v", err)
 		return err
@@ -171,16 +175,17 @@ func unMountPoint(mntPath string) error {
 }
 
 // 删除读写层
-func deleteWriteLayer(rootPath string) error {
-	wirteLayerPath := path.Join(rootPath, common.WriteLayer)
+func deleteWriteLayer(containerName string) error {
+	wirteLayerPath := path.Join(common.RootPath, common.WriteLayer, containerName)
 	return os.RemoveAll(wirteLayerPath)
 }
 
 // 删除文件系统映射
-func deleteVolume(mntPath, volume string) {
+func deleteVolume(containerName, volume string) {
 	if volume != "" {
 		volumes := strings.Split(volume, ":")
 		if len(volumes) > 1 {
+			mntPath := path.Join(common.MntPath, common.WriteLayer, containerName)
 			containerPath := path.Join(mntPath, volumes[1])
 			if _, err := exec.Command("umount", containerPath).CombinedOutput(); err != nil {
 				logrus.Errorf("umount container path, err: %v", err)

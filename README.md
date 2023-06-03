@@ -1,5 +1,5 @@
 # docker-go
-> 学习docker时，用go写的一个简易版docker,实现了docker基本功能以及资源限制隔离，镜像保存导出，日志文件输出等
+> 学习docker时，用go写的一个简易版docker,实现了docker基本功能以及资源限制隔离，镜像保存导出，日志文件输出等,除网络还没实现，其它基本都已实现
 
 ## 参考
 > 代码：https://github.com/pibigstar/go-docker.git \

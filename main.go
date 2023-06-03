@@ -23,6 +23,11 @@ func main() {
 		runCommand,
 		initCommand,
 		commitCommand,
+		listCommand,
+		logCommand,
+		execCommand,
+		stopCommand,
+		removeCommand,
 	}
 
 	app.Before = func(context *cli.Context) error {

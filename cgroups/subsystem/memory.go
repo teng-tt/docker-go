@@ -49,17 +49,19 @@ func (m *MemorySubSystem) Remove(cgroupPath string) error {
 
 // Apply 将进程加入内存限制
 func (m *MemorySubSystem) Apply(cgroupPath string, pid int) error {
-	subsystemCgroupPath, err := GetCgroupPath(m.Name(), cgroupPath, false)
-	if err != nil {
-		return err
-	}
+	if m.apply {
+		subsystemCgroupPath, err := GetCgroupPath(m.Name(), cgroupPath, false)
+		if err != nil {
+			return err
+		}
 
-	// 将进程id 写入task文件进行继承父内存限制
-	taskPath := path.Join(subsystemCgroupPath, "tasks")
-	err = ioutil.WriteFile(taskPath, []byte(strconv.Itoa(pid)), os.ModePerm)
-	if err != nil {
-		logrus.Errorf("write pid to task, path %s, pid: %d, err: %v", taskPath, pid, err)
-		return err
+		// 将进程id 写入task文件进行继承父内存限制
+		taskPath := path.Join(subsystemCgroupPath, "tasks")
+		err = ioutil.WriteFile(taskPath, []byte(strconv.Itoa(pid)), os.ModePerm)
+		if err != nil {
+			logrus.Errorf("write pid to task, path %s, pid: %d, err: %v", taskPath, pid, err)
+			return err
+		}
 	}
 
 	return nil

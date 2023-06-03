@@ -10,15 +10,18 @@ package main
 import (
 	"docker-go/cgroups"
 	"docker-go/cgroups/subsystem"
-	"docker-go/common"
 	"docker-go/container"
 	"github.com/sirupsen/logrus"
 	"os"
 	"strings"
 )
 
-func Run(cmdArray []string, tty bool, res *subsystem.ResourceConfig, volume string) {
-	parent, writePipe := container.NewParentProcess(tty, volume)
+func Run(cmdArray []string, tty bool, res *subsystem.ResourceConfig, containerName, imageName, volume, net string, envs, ports []string) {
+	containerID := container.GetContainerID(10)
+	if containerName == "" {
+		containerName = containerID
+	}
+	parent, writePipe := container.NewParentProcess(tty, volume, containerName, imageName, envs)
 	if parent == nil {
 		logrus.Errorf("failed to new parent process")
 		return
@@ -26,6 +29,11 @@ func Run(cmdArray []string, tty bool, res *subsystem.ResourceConfig, volume stri
 	if err := parent.Start(); err != nil {
 		logrus.Errorf("parent start failed, err %v", err)
 		return
+	}
+	// 记录容器信息
+	err := container.RecordContainerInfo(parent.Process.Pid, cmdArray, containerName, containerID)
+	if err != nil {
+		logrus.Errorf("record container info, err: %v", err)
 	}
 	// 添加资源限制
 	cgroupManager := cgroups.NewCGroupManager("docker-go")
@@ -38,14 +46,19 @@ func Run(cmdArray []string, tty bool, res *subsystem.ResourceConfig, volume stri
 	// 设置初始化命令
 	sendInitCommand(cmdArray, writePipe)
 	// 等待父进程结束
-	err := parent.Wait()
-	if err != nil {
-		logrus.Errorf("parent wait, err: %v", err)
-	}
-	// 删除容器工作空间
-	err = container.DeleteWorkSpace(common.RootPath, common.MntPath, volume)
-	if err != nil {
-		logrus.Errorf("delete work space, err: %v", err)
+	if tty {
+		// 等待父进程结束
+		err := parent.Wait()
+		if err != nil {
+			logrus.Errorf("parent wait, err: %v", err)
+		}
+		// 删除容器工作空间
+		err = container.DeleteWorkSpace(containerName, volume)
+		if err != nil {
+			logrus.Errorf("delete work space, err: %v", err)
+		}
+		// 删除容器信息
+		container.DeleteContainerInfo(containerName)
 	}
 }
 
